@@ -6,56 +6,96 @@ import numpy as np
 
 from models.deeplabv3plus import get_model
 
+
+
 cfg = yaml.safe_load(open("configs/config.yaml"))
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
+TEST_DIR = cfg["dataset"]["test_images"]
+RESULT_DIR = cfg["output"]["results_dir"]
+MODEL_PATH = os.path.join(cfg["output"]["checkpoint_dir"], "best_model.pth")
+
+os.makedirs(RESULT_DIR, exist_ok=True)
+
+
+
+if torch.backends.mps.is_available():
+    device = torch.device("mps")
+elif torch.cuda.is_available():
+    device = torch.device("cuda")
+else:
+    device = torch.device("cpu")
+
+print("Using device:", device)
+
 
 model = get_model(cfg["model"]["num_classes"])
+
 model.load_state_dict(
-    torch.load(
-        os.path.join(cfg["output"]["checkpoint_dir"], "best_model.pth"),
-        map_location=device
-    )
+    torch.load(MODEL_PATH, map_location=device)
 )
 
 model.to(device)
 model.eval()
 
-os.makedirs(cfg["output"]["results_dir"], exist_ok=True)
 
-TARGET_HEIGHT = 544
-TARGET_WIDTH = 960
 
-for name in os.listdir(cfg["dataset"]["test_images"]):
+print("Starting predictions...")
 
-    path = os.path.join(cfg["dataset"]["test_images"], name)
+for name in sorted(os.listdir(TEST_DIR)):
 
-    print(f"Processing: {name}")
+    path = os.path.join(TEST_DIR, name)
 
-    img = cv2.imread(path)
+    image = cv2.imread(path)
 
-    if img is None:
-        print(f"Skipping invalid image: {name}")
+    if image is None:
         continue
 
-    img_resized = cv2.resize(img, (TARGET_WIDTH, TARGET_HEIGHT))
+    original = image.copy()
 
-    t = torch.from_numpy(img_resized).permute(2, 0, 1).float() / 255.0
-    t = t.unsqueeze(0).to(device)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image = image.astype(np.float32) / 255.0
+
+
+
+    h, w = image.shape[:2]
+
+    pad_h = (16 - h % 16) % 16
+    pad_w = (16 - w % 16) % 16
+
+    image = cv2.copyMakeBorder(
+        image,
+        0, pad_h,
+        0, pad_w,
+        cv2.BORDER_CONSTANT,
+        value=0
+    )
+
+
+
+    tensor = torch.tensor(image).permute(2,0,1).unsqueeze(0).to(device)
+
 
     with torch.no_grad():
-        pred = model(t)
 
-    pred = torch.argmax(pred, dim=1).cpu().numpy()[0]
+        pred = model(tensor)
 
-    pred_vis = (pred * 255).astype(np.uint8)
+        pred = torch.sigmoid(pred)
+
+        pred = pred.cpu().numpy()[0][0]
 
 
-    save_path = os.path.join(cfg["output"]["results_dir"], name)
-    cv2.imwrite(save_path, pred_vis)
 
-    print(f"Saved: {save_path}")
+    pred = pred[:h, :w]
 
-print("\nAll predictions completed.")
 
+
+    mask = (pred > 0.5).astype(np.uint8) * 255
+
+
+    save_path = os.path.join(RESULT_DIR, name)
+
+    cv2.imwrite(save_path, mask)
+
+
+print("\nAll predictions completed!")
+print("Results saved in:", RESULT_DIR)
