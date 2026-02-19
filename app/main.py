@@ -7,11 +7,11 @@ import os
 from models.deeplabv3plus import get_model
 
 
+
 MODEL_PATH = "runs/checkpoints/best_model.pth"
 IMG_WIDTH = 960
 IMG_HEIGHT = 544
-THRESHOLD = 0.7   
-
+THRESHOLD = 0.7
 
 st.set_page_config(
     page_title="Falcon Segmentation Dashboard",
@@ -51,6 +51,7 @@ def predict_image(original_img):
 
     original_h, original_w = original_img.shape[:2]
 
+
     img = cv2.resize(original_img, (IMG_WIDTH, IMG_HEIGHT))
 
     tensor = torch.from_numpy(img).permute(2,0,1).float()/255.0
@@ -64,14 +65,18 @@ def predict_image(original_img):
 
     prob_map = probability.cpu().numpy()[0][0]
 
+
     mask = (prob_map > THRESHOLD).astype(np.uint8)
 
+
     mask = cv2.resize(mask, (original_w, original_h), interpolation=cv2.INTER_NEAREST)
+
 
     colored_mask = np.zeros((original_h, original_w, 3), dtype=np.uint8)
 
     colored_mask[mask == 1] = [255,0,0]
 
+    # overlay
     overlay = original_img.copy()
 
     overlay[mask == 1] = [0,0,255]
@@ -85,7 +90,6 @@ def predict_image(original_img):
     )
 
     return colored_mask, blended
-
 
 
 uploaded = st.file_uploader(
